@@ -37,6 +37,10 @@ class AddTextResponse(BaseModel):
     inserted_id: str
     title: str
 
+class SearchTextRequest(BaseModel):
+    query: str
+    limit: int = 5
+
 # --- Helper: convert numpy array to list of floats ---
 def _to_list(vector):
     # sentence-transformers encode returns numpy array or list
@@ -71,3 +75,34 @@ def add_text(payload: AddTextRequest):
         return {"inserted_id": str(res.inserted_id), "title": payload.title}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search-text")
+def search_text(payload: SearchTextRequest):
+    # 1. Convert query to embedding
+    query_embedding = model.encode(payload.query).tolist()
+
+    # 2. Vector search pipeline
+    pipeline = [
+        {
+            "$vectorSearch": {
+                "queryVector": query_embedding,
+                "path": "embedding",
+                "numCandidates": 100,
+                "limit": payload.limit,
+                "index": "vector_texts_search"  # if your index has a custom name, update here
+            }
+        },
+        {
+            "$project": {
+                "title": 1,
+                "content": 1,
+                "score": { "$meta": "vectorSearchScore" },
+                "_id": 0
+            }
+        }
+    ]
+
+    # 3. Run the search
+    results = list(texts_coll.aggregate(pipeline))
+    return {"results": results}
